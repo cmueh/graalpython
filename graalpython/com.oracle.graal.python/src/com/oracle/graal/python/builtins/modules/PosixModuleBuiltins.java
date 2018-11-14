@@ -200,7 +200,7 @@ public class PosixModuleBuiltins extends PythonBuiltins {
             filePaths.set(fd, null);
         }
 
-        private static int nextFreeFd() {
+        protected static int nextFreeFd() {
             for (int i = 0; i < filePaths.size(); i++) {
                 String openPath = filePaths.get(i);
                 if (openPath == null) {
@@ -1024,15 +1024,6 @@ public class PosixModuleBuiltins extends PythonBuiltins {
         }
     }
 
-    @Builtin(name = "waitpid", fixedNumOfPositionalArgs = 2)
-    @GenerateNodeFactory
-    abstract static class WaitpidNode extends PythonBinaryBuiltinNode {
-        @SuppressWarnings("unused")
-        @Specialization
-        PTuple waitpid(int pid, int options) {
-            throw raise(NotImplementedError, "waitpid");
-        }
-    }
 
     // FIXME: this is not nearly ready, just good enough for now
     @Builtin(name = "system", fixedNumOfPositionalArgs = 1)
@@ -1200,4 +1191,264 @@ public class PosixModuleBuiltins extends PythonBuiltins {
             return factory().createBytes(range);
         }
     }
+
+
+
+    @Builtin(name="WIFSIGNALED", fixedNumOfPositionalArgs = 1)
+    @GenerateNodeFactory
+    abstract static class WifsignaledNode extends PythonBuiltinNode{
+
+        /**
+         * Note: Implementation taken from glibc
+         * @param status
+         * @return
+         */
+        @Specialization
+        @TruffleBoundary
+        boolean wifsignaled(int status){
+            return ((char) (((status)&0x7f)+1)>>1) >1;
+        }
+    }
+
+    @Builtin(name="WTERMSIG", fixedNumOfPositionalArgs = 1)
+    @GenerateNodeFactory
+    abstract static class WtermsigNode extends PythonBuiltinNode{
+
+        /**
+         * Note: Implementation taken from glibc
+         * @param status
+         * @return
+         */
+        @Specialization
+        @TruffleBoundary
+        boolean wtermsig(int status){
+            return (status & 0x7f) != 0;
+        }
+    }
+
+    @Builtin(name="WIFEXITED", fixedNumOfPositionalArgs = 1)
+    @GenerateNodeFactory
+    abstract static class WifexitedNode extends PythonBuiltinNode{
+        /**
+         * Note: Implementation taken from glibc
+         * @param status
+         * @return
+         */
+        @Specialization
+        @TruffleBoundary
+        boolean wifexited(int status){
+            return ((status) & 0x7f ) == 0;
+        }
+    }
+
+
+    @Builtin(name="WEXITSTATUS", fixedNumOfPositionalArgs = 1)
+    @GenerateNodeFactory
+    abstract static class WexitstatusNode extends PythonBuiltinNode{
+
+        /**
+         * Note: Implementation taken from glibc
+         * @param status
+         * @return
+         */
+        @Specialization
+        @TruffleBoundary
+        boolean wexitstatus(int status){
+            return ((status & 0xFF00) >> 8) != 0;
+        }
+    }
+
+
+
+    @Builtin(name="WIFSTOPPED", fixedNumOfPositionalArgs = 1)
+    @GenerateNodeFactory
+    abstract static class WifstoppedNode extends PythonBuiltinNode{
+        /**
+         * Note: Implementation taken from glibc
+         * @param status
+         * @return
+         */
+        @Specialization
+        @TruffleBoundary
+        boolean wifstopped(int status){
+            return (status & 0xff)== 0x7f;
+        }
+    }
+
+    @Builtin(name="WSTOPSIG", fixedNumOfPositionalArgs = 1)
+    @GenerateNodeFactory
+    abstract static class WstopsigNode extends PythonBuiltinNode{
+        /**
+         * Note: Implementation taken from glibc
+         * @param status
+         * @return
+         */
+        @Specialization
+        @TruffleBoundary
+        boolean wstopsig(int status){
+            return ((status & 0xFF00) >> 8) != 0;
+        }
+    }
+
+    @Builtin(name="waitpid", fixedNumOfPositionalArgs = 2)
+    @GenerateNodeFactory
+    abstract static class WaitpidNode extends PythonBuiltinNode{
+        @Specialization
+        @TruffleBoundary
+        PTuple waitpid(long pid, int options){
+
+            //TODO check what is really needed
+            if(pid < -1){
+                //wait for any chlid process whose process group id is equal to the value of pid
+                throw raise(PythonErrorType.NotImplementedError, "Not implemented for pid <= 1");
+            }else if(pid == -1){
+                //wait for any child process
+                throw raise(PythonErrorType.NotImplementedError, "Not implemented for pid == -1");
+            }else if(pid == 0){
+                //wait for any child process whose process group id is equal to the value of the calling process
+                throw raise(PythonErrorType.NotImplementedError, "Not implemented for pid == 0");
+            }else{
+                //pid > 0 wait for the child process with this pid
+
+                //TODO consider possible options: WNOHANG, WUNTRACED and WCONTINUED
+                // seems like only WNOHANG is needed?
+
+                Process p = PosixSubprocessModuleBuiltins.getProcessByPid(pid);
+                int status = -1;
+                try {
+                    status = p.waitFor();
+
+                    //TODO: Make sure that here is the right place
+                    PosixSubprocessModuleBuiltins.removeProcessByPid(pid);
+
+                } catch (InterruptedException e) {
+                    //TODO: Error handling
+                    e.printStackTrace();
+                    throw raise(PythonErrorType.NotImplementedError, "Error handling for waitFor not implemented");
+                }
+
+
+
+                //TODO encode status return the right way
+                return factory().createTuple(new Object[]{
+                        PosixSubprocessModuleBuiltins.getPidOfProcess(p), status});
+            }
+        }
+    }
+
+    /**
+     * taken from glibc:
+     *
+     *
+     * Bits in the third argument to 'waitpid'
+     * WNOHANG: Dont block waiting
+     */
+    @Builtin(name="WNOHANG", fixedNumOfPositionalArgs = 1)
+    @GenerateNodeFactory
+    abstract static class WnohangNode extends PythonBuiltinNode{
+        @Specialization
+        @TruffleBoundary
+        int wnohang(){
+            return 1;
+        }
+    }
+
+    @SuppressWarnings("MagicConstant")
+    @Builtin(name="pipe", fixedNumOfPositionalArgs = 0)
+    @GenerateNodeFactory
+    abstract static class PipeNode extends PythonFileNode{
+
+        /*TODO find good (already existing?) implementation
+          Looks like there is no good implementation in java
+          for in-memory files that implement SeekableByteChannel?
+        */
+        private class SeekableByteBuffer implements SeekableByteChannel{
+
+            ByteBuffer buffer;
+
+            private long position;
+            private boolean open;
+            public SeekableByteBuffer(ByteBuffer buffer){
+                this.buffer = buffer;
+                open = true;
+            }
+
+            @Override
+            public int read(ByteBuffer dst) throws IOException {
+                if(!isOpen()){
+                    return -1;
+                }
+
+                int i = 0;
+                dst.reset();
+
+                while(dst.remaining() > 0 && buffer.remaining() > 0){
+                    byte b = buffer.get();
+                    dst.put(b);
+                    i++;
+                }
+
+                return i;
+            }
+
+            @Override
+            public int write(ByteBuffer src) throws IOException {
+
+                int before = buffer.position();
+                buffer.put(src);
+                return buffer.position()-before;
+            }
+
+            @Override
+            public long position() throws IOException {
+                return buffer.position();
+            }
+
+            @Override
+            public SeekableByteChannel position(long newPosition) throws IOException {
+                //seeking not allowed in pipes...
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public long size() throws IOException {
+                return buffer.position();
+            }
+
+            @Override
+            public SeekableByteChannel truncate(long size) throws IOException {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public boolean isOpen() {
+                return open;
+            }
+
+            @Override
+            public void close() throws IOException {
+                open = false;
+            }
+        }
+
+        @Specialization
+        @TruffleBoundary
+        Object pipe(){
+
+            ByteBuffer buffer = ByteBuffer.allocate(1024);
+            SeekableByteBuffer p = new SeekableByteBuffer(buffer);
+
+            int a = nextFreeFd();
+            files.set(a,p);
+            filePaths.set(a,"pipe");
+
+            int b = nextFreeFd();
+            files.set(b,p);
+            filePaths.set(b,"pipe");
+
+            return factory().createTuple(new Object[]{a,b});
+        }
+
+    }
+
 }
